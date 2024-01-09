@@ -30,6 +30,27 @@ is_sm_supported = (
 ) or (paddle.device.cuda.get_device_capability()[0] >= 9)
 
 
+def check_fp8_support() -> bool:
+    """Return if fp8 support is available"""
+    gpu_arch = (
+        paddle.device.cuda.get_device_capability()[0] * 10
+        + paddle.device.cuda.get_device_capability()[1]
+    )
+    if gpu_arch >= 90:  # hopper and above
+        return True
+    # Device compute capability 8.9 or higher required for FP8 execution.
+    if gpu_arch < 89:  # pre-ada
+        return False
+    # TODO(Wanglongzhi2001): paddle don't support get cublasLt version for now.
+    # CublasLt version 12.1.3.x or higher required for FP8 execution on Ada.
+    # if get_cublasLt_version() < 120103:
+    #     return False,
+    # Cuda version 12.1 or higher required for FP8 execution on Ada.
+    if get_cuda_version() < 12010:
+        return False
+    return True
+
+
 def _to_fp8_saturated(x: paddle.Tensor, float8_dtype) -> paddle.Tensor:
     # The default behavior in Paddle for casting to `float8_e4m3fn`
     # and `e5m2` is to not saturate. So we saturate here manualy.
@@ -41,33 +62,33 @@ def _to_fp8_saturated(x: paddle.Tensor, float8_dtype) -> paddle.Tensor:
 
 
 @unittest.skipIf(
-    not core.is_compiled_with_cuda()
-    or get_cuda_version() < 11080
-    or not is_sm_supported,
-    "MatmulFp8 requires CUDA >= 11.8 and SM version >= 8.9",
+    not core.is_compiled_with_cuda() or not check_fp8_support(),
+    "Fp8 matmul requires CUDA >= 12.1 on Ada arch or hopper arch",
 )
 class TestMatmulFp8(unittest.TestCase):
     def config(self):
         self.dtype = 'float8_e4m3fn'
-        self.rtol = 0.7
-        self.atol = 2.5
-        self.x_shape = (32, 16)
-        self.y_shape = (16, 32)
+        self.rtol = 0.6
+        self.atol = 7.6
+        self.x_shape = (64, 64)
+        self.y_shape = (64, 64)
 
     def setUp(self):
         self.config()
         paddle.seed(2024)
-        self.input_a = paddle.rand(self.x_shape).astype(self.dtype)
-        self.input_b = paddle.rand(self.y_shape).astype(self.dtype)
+        self.input_a = paddle.rand(self.x_shape)
+        self.input_a_fp8 = _to_fp8_saturated(self.input_a, paddle.float8_e4m3fn)
+        self.input_b = paddle.rand(self.y_shape)
+        self.input_b_fp8 = _to_fp8_saturated(self.input_b, paddle.float8_e4m3fn)
 
     def get_reference_out(self):
-        self.input_a_fp16 = self.input_a.astype("float16")
-        self.input_b_fp16 = self.input_b.astype("float16")
+        self.input_a_fp16 = self.input_a_fp8.astype("float16")
+        self.input_b_fp16 = self.input_b_fp8.astype("float16")
         out = paddle.matmul(self.input_a_fp16, self.input_b_fp16)
         return out
 
     def get_op_out(self):
-        out = paddle.matmul(self.input_a, self.input_b)
+        out = paddle.matmul(self.input_a_fp8, self.input_b_fp8)
         return out
 
     def test_matmul_fp8(self):

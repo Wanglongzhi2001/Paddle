@@ -247,7 +247,7 @@ template <typename T>
 void CublasLtMatmulFP8(const phi::GPUContext& dev_ctx,
                        const phi::DenseTensor& mat_a,
                        const phi::DenseTensor& mat_b,
-                       const phi::DenseTensor& workspace,
+                       phi::DenseTensor* workspace,
                        phi::DenseTensor* out) {
   int m = mat_a.dims()[0];
   int k = mat_a.dims()[1];
@@ -282,7 +282,7 @@ void CublasLtMatmulFP8(const phi::GPUContext& dev_ctx,
   int returnedResults = 0;
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   cublasLtMatmulPreference_t preference = NULL;
-  size_t work_space_size = workspace.numel();
+  size_t work_space_size = workspace->numel();
 
   status = dyl::cublasLtMatmulPreferenceCreate(&preference);
   status = dyl::cublasLtMatmulPreferenceSetAttribute(
@@ -323,7 +323,7 @@ void CublasLtMatmulFP8(const phi::GPUContext& dev_ctx,
                           // nullptr,
                           &heuristicResult.algo,
                           //  nullptr,
-                          reinterpret_cast<void*>(workspace.data<int8_t>()),
+                          reinterpret_cast<void*>(workspace->data<int8_t>()),
                           // 0,
                           work_space_size,
                           dev_ctx.stream());
