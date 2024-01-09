@@ -20,11 +20,29 @@ from test_sparse_attention_op import get_cuda_version
 import paddle
 from paddle.base import core
 
-is_sm_supported = (paddle.device.cuda.get_device_capability()[0] == 8 and paddle.device.cuda.get_device_capability()[1] == 9) \
-    or (paddle.device.cuda.get_device_capability()[0] >= 9)
+# define the e4m3/e5m2 constants
+E4M3_MAX_POS = 448.0
+E5M2_MAX_POS = 57344.0
+
+is_sm_supported = (
+    paddle.device.cuda.get_device_capability()[0] == 8
+    and paddle.device.cuda.get_device_capability()[1] == 9
+) or (paddle.device.cuda.get_device_capability()[0] >= 9)
+
+
+def _to_fp8_saturated(x: paddle.Tensor, float8_dtype) -> paddle.Tensor:
+    # The default behavior in Paddle for casting to `float8_e4m3fn`
+    # and `e5m2` is to not saturate. So we saturate here manualy.
+    if float8_dtype == paddle.float8_e4m3fn:
+        x = x.clip(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+    else:
+        x = x.clip(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
+    return x.to(float8_dtype)
+
 
 @unittest.skipIf(
-    not core.is_compiled_with_cuda() or get_cuda_version() < 11080
+    not core.is_compiled_with_cuda()
+    or get_cuda_version() < 11080
     or not is_sm_supported,
     "MatmulFp8 requires CUDA >= 11.8 and SM version >= 8.9",
 )
@@ -38,21 +56,19 @@ class TestMatmulFp8(unittest.TestCase):
 
     def setUp(self):
         self.config()
-        np.random.seed(2014)
-        self.input_a_np = np.random.random(self.x_shape)
-        self.input_b_np = np.random.random(self.y_shape)
-        self.input_a = paddle.to_tensor(self.input_a_np).astype(self.dtype)
-        self.input_b = paddle.to_tensor(self.input_b_np).astype(self.dtype)
+        paddle.seed(2024)
+        self.input_a = paddle.rand(self.x_shape).astype(self.dtype)
+        self.input_b = paddle.rand(self.y_shape).astype(self.dtype)
 
     def get_reference_out(self):
-        out = np.matmul(self.input_a_np, self.input_b_np)
+        self.input_a_fp16 = self.input_a.astype("float16")
+        self.input_b_fp16 = self.input_b.astype("float16")
+        out = paddle.matmul(self.input_a_fp16, self.input_b_fp16)
         return out
 
     def get_op_out(self):
-        out = paddle.matmul(
-            self.input_a, self.input_b
-        )
-        return out.numpy()
+        out = paddle.matmul(self.input_a, self.input_b)
+        return out
 
     def test_matmul_fp8(self):
         out_real = self.get_op_out()
@@ -60,6 +76,7 @@ class TestMatmulFp8(unittest.TestCase):
         np.testing.assert_allclose(
             out_real, out_expect, rtol=self.rtol, atol=self.atol
         )
+
 
 if __name__ == '__main__':
     unittest.main()
