@@ -606,10 +606,14 @@ PD_REGISTER_KERNEL(conv2d,
                    GPUDNN,
                    ALL_LAYOUT,
                    phi::ConvCudnnKernel,
+#if CUDNN_VERSION_MIN(8, 6, 0) && CUDA_VERSION >= 11800
+                   phi::dtype::float8_e4m3fn,
+#endif
                    float,
                    double,
                    phi::dtype::float16,
-                   phi::dtype::bfloat16) {}
+                   phi::dtype::bfloat16) {
+}
 
 PD_REGISTER_KERNEL(conv3d,
                    GPUDNN,
